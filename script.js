@@ -3,7 +3,8 @@
    ================================================
    - إدخال وتحقق المشاركين
    - سحب عشوائي آمن عبر crypto.getRandomValues
-   - رسم العجلة على Canvas مع رسوم متحركة سلسة
+   - أداء عالٍ: رسم العجلة مرة واحدة على canvas خارجي
+     ثم مجرد تدويره في الرسوم المتحركة (O(1) لكل إطار)
    - حفظ مؤقت في localStorage + سجل السحوبات
    ================================================ */
 
@@ -22,30 +23,39 @@
     '#A8E6CF', '#FF8C94', '#B4A7E5', '#FBBF24'
   ];
 
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
   // ============ State ============
   const state = {
-    participants: [],   // { id, name, empId, createdAt }
-    history: [],        // { id, name, empId, at, totalParticipants }
+    participants: [],
+    history: [],
     isSpinning: false,
-    rotation: 0,        // current radians
-    editingId: null,
-    lastWinnerId: null
+    rotation: 0,
+    editingId: null
   };
 
   // ============ DOM Shortcuts ============
   const $ = (sel) => document.querySelector(sel);
   const dom = {
+    // Screens
+    screenRegister: $('#screenRegister'),
+    screenDraw: $('#screenDraw'),
+    goToDraw: $('#goToDraw'),
+    backToRegister: $('#backToRegister'),
+    stepper: $('#stepper'),
+    drawCount: $('#drawCount'),
+    counterSummary: $('#counterSummary'),
+
     form: $('#addForm'),
     name: $('#name'),
     emp: $('#empId'),
-    nameErr: document.querySelector('.err[data-for="name"]'),
-    empErr: document.querySelector('.err[data-for="empId"]'),
     submitBtn: $('#submitBtn'),
     submitLabel: $('#submitLabel'),
     cancelEditBtn: $('#cancelEditBtn'),
     participants: $('#participants'),
     countBadge: $('#countBadge'),
     clearAll: $('#clearAll'),
+    loadSample: $('#loadSample'),
     emptyHint: $('#emptyHint'),
     wheel: $('#wheel'),
     wheelEmpty: $('#wheelEmpty'),
@@ -53,7 +63,6 @@
     drawBtn: $('#drawBtn'),
     status: $('#status'),
     statusText: document.querySelector('#status .status-text'),
-    excludeWinner: $('#excludeWinner'),
 
     // Winner
     winnerOverlay: $('#winnerOverlay'),
@@ -88,6 +97,11 @@
 
   const ctx = dom.wheel.getContext('2d');
 
+  // Offscreen pre-rendered wheel (performance key)
+  let wheelCache = null;    // HTMLCanvasElement
+  let wheelCacheSize = 0;   // in CSS pixels
+  let wheelCacheN = 0;      // number of participants when cache was built
+
   // ============ Utilities ============
   function uid() {
     return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -97,15 +111,11 @@
     return String(s || '').trim().replace(/\s+/g, ' ');
   }
 
-  /**
-   * Cryptographically-secure random index in [0, max)
-   * Uses rejection sampling to avoid modulo bias.
-   */
+  /** Cryptographically-secure random index in [0, max). Rejection sampling avoids modulo bias. */
   function secureRandomIndex(max) {
     if (max <= 1) return 0;
     const buf = new Uint32Array(1);
     const MAX_U32 = 0xFFFFFFFF;
-    // Largest multiple of `max` less than or equal to 2^32
     const limit = MAX_U32 - (MAX_U32 % max) - 1;
     let r;
     do {
@@ -118,21 +128,16 @@
   function formatDate(iso) {
     const d = new Date(iso);
     const pad = (n) => String(n).padStart(2, '0');
-    const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
-    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    return `${date} — ${time}`;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} — ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   function showToast(message, type = 'info') {
     dom.toast.className = 'toast';
     dom.toast.textContent = message;
-    // Force reflow to restart transition
     void dom.toast.offsetWidth;
     dom.toast.className = 'toast show ' + type;
     clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => {
-      dom.toast.className = 'toast';
-    }, 2800);
+    showToast._t = setTimeout(() => { dom.toast.className = 'toast'; }, 2800);
   }
 
   function initials(name) {
@@ -145,6 +150,20 @@
   function truncate(s, n) {
     if (!s) return '';
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  }
+
+  function hexLuminance(hex) {
+    const c = hex.replace('#', '');
+    const r = parseInt(c.slice(0, 2), 16) / 255;
+    const g = parseInt(c.slice(2, 4), 16) / 255;
+    const b = parseInt(c.slice(4, 6), 16) / 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b;
   }
 
   // ============ Persistence ============
@@ -170,13 +189,8 @@
   function setFieldError(field, msg) {
     const container = field.closest('.field');
     const err = container.querySelector('.err');
-    if (msg) {
-      container.classList.add('has-error');
-      err.textContent = msg;
-    } else {
-      container.classList.remove('has-error');
-      err.textContent = '';
-    }
+    if (msg) { container.classList.add('has-error'); err.textContent = msg; }
+    else { container.classList.remove('has-error'); err.textContent = ''; }
   }
   function clearErrors() {
     setFieldError(dom.name, '');
@@ -202,7 +216,6 @@
     if (!empId) { setFieldError(dom.emp, 'الرقم الوظيفي مطلوب'); valid = false; }
     else if (empId.length < 1) { setFieldError(dom.emp, 'الرقم الوظيفي غير صحيح'); valid = false; }
     else {
-      // check duplicate
       const dup = state.participants.find(p => p.empId === empId && p.id !== excludeId);
       if (dup) { setFieldError(dom.emp, 'هذا الرقم الوظيفي موجود مسبقاً'); valid = false; }
       else { setFieldError(dom.emp, ''); }
@@ -211,10 +224,12 @@
   }
 
   // ============ Participants CRUD ============
+  function invalidateWheelCache() { wheelCache = null; }
+
   function addParticipant(name, empId) {
-    const p = { id: uid(), name, empId, createdAt: new Date().toISOString() };
-    state.participants.push(p);
+    state.participants.push({ id: uid(), name, empId, createdAt: new Date().toISOString() });
     saveParticipants();
+    invalidateWheelCache();
     renderParticipants();
     drawWheel();
     updateDrawButton();
@@ -224,9 +239,9 @@
   function updateParticipant(id, name, empId) {
     const p = state.participants.find(p => p.id === id);
     if (!p) return;
-    p.name = name;
-    p.empId = empId;
+    p.name = name; p.empId = empId;
     saveParticipants();
+    invalidateWheelCache();
     renderParticipants();
     drawWheel();
     showToast('تم تحديث المشارك', 'success');
@@ -238,6 +253,7 @@
     state.participants.splice(idx, 1);
     if (state.editingId === id) cancelEdit();
     saveParticipants();
+    invalidateWheelCache();
     renderParticipants();
     drawWheel();
     updateDrawButton();
@@ -248,6 +264,7 @@
     state.participants = [];
     cancelEdit();
     saveParticipants();
+    invalidateWheelCache();
     renderParticipants();
     drawWheel();
     updateDrawButton();
@@ -275,11 +292,103 @@
     renderParticipants();
   }
 
+  // ============ Sample Data Generator ============
+  const SAMPLE_FIRST = [
+    'محمد','أحمد','عبدالله','خالد','سعد','فهد','عبدالعزيز','علي','عمر','سلمان',
+    'ناصر','تركي','بندر','فيصل','نواف','ماجد','هشام','ياسر','طارق','سامي',
+    'وليد','عادل','راشد','مازن','غازي','سلطان','عبدالرحمن','إبراهيم','يوسف','حسن',
+    'مشعل','عبدالمجيد','بدر','سعود','فارس','رامي','زياد','مروان','أنس','باسم',
+    'فاطمة','نورة','سارة','منى','هدى','أمل','ريم','دانة','جواهر','لطيفة',
+    'العنود','روان','شهد','لمى','ليان','جود','رهف','غلا','أسماء','مها'
+  ];
+  const SAMPLE_MIDDLE = [
+    'محمد','أحمد','عبدالله','خالد','سعد','فهد','عبدالعزيز','علي','عمر','سلمان',
+    'ناصر','إبراهيم','يوسف','حسن','حسين','صالح','سعيد','طلال','عبدالرحمن','بدر'
+  ];
+  const SAMPLE_LAST = [
+    'العتيبي','القحطاني','الحربي','الزهراني','الشمري','الغامدي','المطيري','الدوسري',
+    'السبيعي','السلمي','البلوي','العنزي','الرشيدي','الخالدي','الشهري','الأحمدي',
+    'العمري','القرشي','الجهني','البقمي','الثقفي','المالكي','الفيفي','العسيري',
+    'الحازمي','الصاعدي','المولد','الرويلي','العصيمي','الخثعمي'
+  ];
+
+  function generateSampleParticipants(count = 100) {
+    const out = [];
+    const usedNames = new Set();
+    const usedIds = new Set(state.participants.map(p => p.empId));
+    let nextId = 10001;
+    while (usedIds.has(String(nextId))) nextId++;
+    let guard = 0;
+    while (out.length < count && guard < count * 20) {
+      guard++;
+      const first = SAMPLE_FIRST[secureRandomIndex(SAMPLE_FIRST.length)];
+      const middle = SAMPLE_MIDDLE[secureRandomIndex(SAMPLE_MIDDLE.length)];
+      const last = SAMPLE_LAST[secureRandomIndex(SAMPLE_LAST.length)];
+      const fullName = `${first} ${middle} ${last}`;
+      if (usedNames.has(fullName)) continue;
+      usedNames.add(fullName);
+      while (usedIds.has(String(nextId))) nextId++;
+      const empId = String(nextId);
+      usedIds.add(empId);
+      nextId++;
+      out.push({ id: uid(), name: fullName, empId, createdAt: new Date().toISOString() });
+    }
+    return out;
+  }
+
+  async function loadSampleData() {
+    if (state.isSpinning) return;
+    const msg = state.participants.length > 0
+      ? `ستتم إضافة 100 مشارك تجريبي إلى القائمة الحالية (${state.participants.length}). متابعة؟`
+      : 'سيتم تحميل 100 مشارك تجريبي بأسماء ثلاثية عربية وأرقام وظيفية فريدة. متابعة؟';
+    const ok = await askConfirm('تحميل بيانات تجريبية', msg);
+    if (!ok) return;
+    const newOnes = generateSampleParticipants(100);
+    state.participants = state.participants.concat(newOnes);
+    saveParticipants();
+    invalidateWheelCache();
+    renderParticipants();
+    drawWheel();
+    updateDrawButton();
+    showToast(`تمت إضافة ${newOnes.length} مشارك تجريبي`, 'success');
+  }
+
+  // ============ Screen Navigation ============
+  function showScreen(name) {
+    if (name === 'draw') {
+      dom.screenRegister.hidden = true;
+      dom.screenDraw.hidden = false;
+      updateStepper('draw');
+      requestAnimationFrame(() => {
+        invalidateWheelCache();
+        drawWheel();
+        updateDrawButton();
+      });
+    } else {
+      dom.screenDraw.hidden = true;
+      dom.screenRegister.hidden = false;
+      updateStepper('register');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function updateStepper(activeStep) {
+    const steps = dom.stepper.querySelectorAll('.step');
+    steps.forEach(s => {
+      s.classList.remove('step-active', 'step-done');
+      if (s.dataset.step === activeStep) s.classList.add('step-active');
+      else if (activeStep === 'draw' && s.dataset.step === 'register') s.classList.add('step-done');
+    });
+  }
+
   // ============ Rendering: Participants ============
   function renderParticipants() {
     dom.participants.innerHTML = '';
     const count = state.participants.length;
     dom.countBadge.textContent = count;
+    if (dom.counterSummary) dom.counterSummary.querySelector('.big').textContent = count;
+    if (dom.goToDraw) dom.goToDraw.disabled = (count < 1);
+    if (dom.drawCount) dom.drawCount.textContent = count;
 
     if (count === 0) {
       dom.emptyHint.style.display = 'grid';
@@ -288,14 +397,15 @@
       return;
     }
     dom.emptyHint.style.display = 'none';
-    dom.participants.style.display = 'flex';
+    dom.participants.style.display = '';
     dom.clearAll.style.visibility = 'visible';
 
+    // Render via DocumentFragment for speed with 100+ entries
+    const frag = document.createDocumentFragment();
     state.participants.forEach((p, idx) => {
       const li = document.createElement('li');
       li.className = 'participant' + (p.id === state.editingId ? ' editing' : '');
       li.dataset.id = p.id;
-
       const color = SEGMENT_COLORS[idx % SEGMENT_COLORS.length];
       li.innerHTML = `
         <div class="avatar" style="background:${color}">${escapeHtml(initials(p.name))}</div>
@@ -312,163 +422,176 @@
           </button>
         </div>
       `;
-      dom.participants.appendChild(li);
+      frag.appendChild(li);
     });
+    dom.participants.appendChild(frag);
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  // ============ Rendering: Wheel (Canvas) ============
-  function setupCanvas() {
+  // ============ Wheel — Offscreen pre-render + cheap rotation ============
+  function setupMainCanvas() {
     const rect = dom.wheel.getBoundingClientRect();
-    const DPR = Math.min(window.devicePixelRatio || 1, 2);
     const size = Math.max(300, Math.floor(rect.width));
     dom.wheel.width = size * DPR;
     dom.wheel.height = size * DPR;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(DPR, DPR);
     return size;
   }
 
-  function drawWheel() {
-    const size = setupCanvas();
+  /**
+   * Pre-render the wheel (at rotation=0) to an offscreen canvas.
+   * This runs ONCE per list change, not per animation frame.
+   */
+  function buildWheelCache(size) {
+    const n = state.participants.length;
+    const c = document.createElement('canvas');
+    c.width = size * DPR;
+    c.height = size * DPR;
+    const cctx = c.getContext('2d');
+    cctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
     const cx = size / 2;
     const cy = size / 2;
     const radius = size / 2 - 8;
 
-    ctx.clearRect(0, 0, size, size);
-
-    const n = state.participants.length;
     if (n === 0) {
-      dom.wheelEmpty.style.display = 'grid';
-      // Draw empty circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-      ctx.fill();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-      ctx.stroke();
+      cctx.beginPath();
+      cctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      cctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+      cctx.fill();
+      cctx.lineWidth = 4;
+      cctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      cctx.stroke();
+      wheelCache = c;
+      wheelCacheSize = size;
+      wheelCacheN = 0;
       return;
     }
-    dom.wheelEmpty.style.display = 'none';
 
     const segAngle = (Math.PI * 2) / n;
-    const rot = state.rotation;
 
-    // Draw segments
+    // Draw all segments
     for (let i = 0; i < n; i++) {
-      // Start at top (-π/2), go clockwise
-      const startAngle = -Math.PI / 2 + i * segAngle + rot;
+      const startAngle = -Math.PI / 2 + i * segAngle;
       const endAngle = startAngle + segAngle;
-
-      // Segment fill
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius, startAngle, endAngle);
-      ctx.closePath();
+      cctx.beginPath();
+      cctx.moveTo(cx, cy);
+      cctx.arc(cx, cy, radius, startAngle, endAngle);
+      cctx.closePath();
       const color = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
-      ctx.fillStyle = color;
-      ctx.fill();
+      cctx.fillStyle = color;
+      cctx.fill();
 
-      // Segment separator line
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Text
-      ctx.save();
-      ctx.translate(cx, cy);
-      const midAngle = startAngle + segAngle / 2;
-      ctx.rotate(midAngle);
-
-      // Text color based on luminance — simple rule: darken
-      const luminance = hexLuminance(color);
-      const textColor = luminance > 0.55 ? '#0a0e27' : '#ffffff';
-
-      const p = state.participants[i];
-      const label = formatLabel(p.name, n);
-      const empLabel = p.empId;
-
-      // Adjust text size based on count
-      let fontSize = 16;
-      if (n > 8) fontSize = 14;
-      if (n > 14) fontSize = 12;
-      if (n > 20) fontSize = 11;
-
-      ctx.font = `800 ${fontSize}px Cairo, Tajawal, sans-serif`;
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.direction = 'rtl';
-      ctx.fillStyle = textColor;
-
-      const textX = radius - 14;
-      const textY = 0;
-
-      // Stroke behind text for better contrast
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = luminance > 0.55 ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)';
-      try { ctx.strokeText(label, textX, textY); } catch (_) {}
-      ctx.fillText(label, textX, textY);
-
-      // Employee id (smaller, below)
-      if (n <= 16) {
-        ctx.font = `600 ${Math.max(9, fontSize - 3)}px Cairo, sans-serif`;
-        ctx.fillStyle = textColor;
-        ctx.globalAlpha = 0.75;
-        ctx.fillText('#' + empLabel, textX, textY + fontSize);
-        ctx.globalAlpha = 1;
+      // Separator — skip when very dense to save work & look cleaner
+      if (n <= 60) {
+        cctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+        cctx.lineWidth = 1.2;
+        cctx.stroke();
       }
-
-      ctx.restore();
     }
 
-    // Outer decorative ring
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = 'rgba(255, 209, 102, 0.7)';
-    ctx.stroke();
+    // Text pass — only when segments are big enough to read
+    if (n <= 40) {
+      for (let i = 0; i < n; i++) {
+        const startAngle = -Math.PI / 2 + i * segAngle;
+        const midAngle = startAngle + segAngle / 2;
+        const color = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
+        const luminance = hexLuminance(color);
+        const textColor = luminance > 0.55 ? '#0a0e27' : '#ffffff';
 
-    // Outer shadow ring
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius + 3, 0, Math.PI * 2);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-    ctx.stroke();
+        const p = state.participants[i];
+        let fontSize = 16;
+        if (n > 8) fontSize = 14;
+        if (n > 14) fontSize = 12;
+        if (n > 22) fontSize = 10;
+        if (n > 32) fontSize = 9;
 
-    // Dots around the ring (decorative)
-    const dotCount = Math.min(n * 2, 24);
-    for (let i = 0; i < dotCount; i++) {
-      const a = (Math.PI * 2 / dotCount) * i + rot;
-      const dx = cx + Math.cos(a) * (radius - 12);
-      const dy = cy + Math.sin(a) * (radius - 12);
-      ctx.beginPath();
-      ctx.arc(dx, dy, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.fill();
+        const maxChars = n > 20 ? 8 : n > 14 ? 12 : 18;
+        const label = truncate(p.name, maxChars);
+
+        cctx.save();
+        cctx.translate(cx, cy);
+        cctx.rotate(midAngle);
+        cctx.font = `800 ${fontSize}px Cairo, Tajawal, sans-serif`;
+        cctx.textAlign = 'right';
+        cctx.textBaseline = 'middle';
+        cctx.direction = 'rtl';
+        cctx.fillStyle = textColor;
+        cctx.fillText(label, radius - 14, 0);
+
+        if (n <= 18) {
+          cctx.font = `600 ${Math.max(9, fontSize - 3)}px Cairo, sans-serif`;
+          cctx.globalAlpha = 0.75;
+          cctx.fillText('#' + p.empId, radius - 14, fontSize);
+          cctx.globalAlpha = 1;
+        }
+        cctx.restore();
+      }
+    } else {
+      // Dense mode: just draw segment indices every few segments for reference
+      for (let i = 0; i < n; i += Math.ceil(n / 20)) {
+        const midAngle = -Math.PI / 2 + i * segAngle + segAngle / 2;
+        const color = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
+        const textColor = hexLuminance(color) > 0.55 ? '#0a0e27' : '#ffffff';
+        cctx.save();
+        cctx.translate(cx, cy);
+        cctx.rotate(midAngle);
+        cctx.font = '800 11px Cairo, sans-serif';
+        cctx.textAlign = 'right';
+        cctx.textBaseline = 'middle';
+        cctx.fillStyle = textColor;
+        cctx.fillText('#' + state.participants[i].empId, radius - 10, 0);
+        cctx.restore();
+      }
     }
+
+    // Outer gold ring
+    cctx.beginPath();
+    cctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    cctx.lineWidth = 6;
+    cctx.strokeStyle = 'rgba(255, 209, 102, 0.7)';
+    cctx.stroke();
+
+    cctx.beginPath();
+    cctx.arc(cx, cy, radius + 3, 0, Math.PI * 2);
+    cctx.lineWidth = 2;
+    cctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    cctx.stroke();
+
+    wheelCache = c;
+    wheelCacheSize = size;
+    wheelCacheN = n;
   }
 
-  function formatLabel(name, total) {
-    const maxChars = total > 14 ? 8 : total > 8 ? 12 : 18;
-    return truncate(name, maxChars);
-  }
+  /**
+   * Called per-frame during spin. Very cheap:
+   * - clear canvas
+   * - translate + rotate
+   * - draw cached wheel image
+   */
+  function drawWheel() {
+    if (dom.screenDraw && dom.screenDraw.hidden) return;
 
-  function hexLuminance(hex) {
-    const c = hex.replace('#', '');
-    const r = parseInt(c.slice(0, 2), 16) / 255;
-    const g = parseInt(c.slice(2, 4), 16) / 255;
-    const b = parseInt(c.slice(4, 6), 16) / 255;
-    // Perceptual luminance
-    return 0.299 * r + 0.587 * g + 0.114 * b;
+    const size = setupMainCanvas();
+    const n = state.participants.length;
+
+    // Rebuild cache if size changed, count changed, or first draw
+    if (!wheelCache || wheelCacheSize !== size || wheelCacheN !== n) {
+      buildWheelCache(size);
+    }
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+
+    // Toggle empty-state overlay text
+    dom.wheelEmpty.hidden = (n !== 0);
+
+    const cx = size / 2;
+    const cy = size / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(state.rotation);
+    ctx.drawImage(wheelCache, -size / 2, -size / 2, size, size);
+    ctx.restore();
   }
 
   // ============ Draw Button & Status ============
@@ -489,76 +612,55 @@
       return;
     }
 
-    // Build the eligible pool (maybe exclude last winner)
-    let pool = state.participants.slice();
-    if (dom.excludeWinner.checked && state.lastWinnerId && pool.length > 1) {
-      pool = pool.filter(p => p.id !== state.lastWinnerId);
-    }
-    if (pool.length === 0) {
-      showToast('لا يوجد مشاركون مؤهلون — قم بإلغاء استبعاد الفائز', 'error');
-      return;
-    }
+    // 1) Securely pick a winner from the FULL list (every draw is independent & fair)
+    const n = state.participants.length;
+    const winnerIndex = secureRandomIndex(n);
+    const winner = state.participants[winnerIndex];
 
-    // 1) SECURELY pick a random winner from the pool
-    const winnerPoolIndex = secureRandomIndex(pool.length);
-    const winner = pool[winnerPoolIndex];
-
-    // 2) Find winner's position in the full wheel (drawn order = state.participants order)
-    const winnerWheelIndex = state.participants.findIndex(p => p.id === winner.id);
-
-    // 3) Start spinning
+    // 2) Start spinning
     state.isSpinning = true;
     document.body.classList.add('spinning');
     updateDrawButton();
     setStatus('spinning', 'جاري السحب...');
     cancelEdit();
 
-    const n = state.participants.length;
     const segAngle = (Math.PI * 2) / n;
 
-    // Calculate target rotation so that segment `winnerWheelIndex` lands under the top pointer.
-    // Segment i center (at rot=0) is at angle: -π/2 + (i + 0.5) * segAngle
-    // We want that angle (+ rotation) to equal -π/2 (the pointer direction)
-    //   rotation = -π/2 - (-π/2 + (i + 0.5) * segAngle) = -(i + 0.5) * segAngle
-    //   normalize to positive:  rotation = 2π - (i + 0.5) * segAngle
-    const targetAbsolute = ((Math.PI * 2) - (winnerWheelIndex + 0.5) * segAngle) % (Math.PI * 2);
+    // Target rotation where segment winnerIndex lands under the top pointer
+    const targetAbsolute = ((Math.PI * 2) - (winnerIndex + 0.5) * segAngle) % (Math.PI * 2);
 
-    // Add a small random visual offset within ±30% of the segment so it doesn't always stop dead-center
+    // Tiny visual jitter within the segment (±25%) so the pointer never stops dead-center
     const jitterBuf = new Uint32Array(1);
     crypto.getRandomValues(jitterBuf);
-    const jitter = ((jitterBuf[0] / 0xFFFFFFFF) - 0.5) * segAngle * 0.55;
+    const jitter = ((jitterBuf[0] / 0xFFFFFFFF) - 0.5) * segAngle * 0.5;
 
-    // Current normalized rotation
     const currentNorm = ((state.rotation % (Math.PI * 2)) + (Math.PI * 2)) % (Math.PI * 2);
-
-    // Delta: go from currentNorm to targetAbsolute, always forward
     let delta = targetAbsolute - currentNorm + jitter;
     while (delta < 0) delta += Math.PI * 2;
 
-    // Add dramatic extra full rotations (7-9 full turns)
-    const extraSpins = 7 + Math.floor(Math.random() * 3);
+    // Duration and spin count tuned for smoothness + drama
+    // Fewer total rotations = less work per frame, but still feels dramatic
+    const extraSpins = 5 + Math.floor(Math.random() * 2); // 5–6 full turns
     const totalDelta = delta + extraSpins * Math.PI * 2;
 
     const startRot = state.rotation;
     const endRot = startRot + totalDelta;
-    const duration = 5500 + Math.floor(Math.random() * 800); // 5.5 – 6.3s
+    const duration = 4800 + Math.floor(Math.random() * 600); // 4.8–5.4s
     const t0 = performance.now();
 
-    function easeOutQuint(t) {
-      return 1 - Math.pow(1 - t, 5);
-    }
+    // Smoother easing — easeOutCubic decelerates gracefully without the sudden late-stop of quint
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
     function step(now) {
       const elapsed = now - t0;
       const t = Math.min(elapsed / duration, 1);
-      const eased = easeOutQuint(t);
+      const eased = easeOutCubic(t);
       state.rotation = startRot + (endRot - startRot) * eased;
       drawWheel();
 
       if (t < 1) {
         requestAnimationFrame(step);
       } else {
-        // Ensure exact final position
         state.rotation = endRot;
         drawWheel();
         finishDraw(winner);
@@ -570,9 +672,7 @@
   function finishDraw(winner) {
     state.isSpinning = false;
     document.body.classList.remove('spinning');
-    state.lastWinnerId = winner.id;
 
-    // Record history
     const entry = {
       id: uid(),
       name: winner.name,
@@ -588,8 +688,7 @@
     setStatus('done', 'تم اختيار الفائز');
     updateDrawButton();
 
-    // Show the winner overlay with a small delay for drama
-    setTimeout(() => showWinner(winner, entry.at), 350);
+    setTimeout(() => showWinner(winner, entry.at), 300);
   }
 
   // ============ Winner Display ============
@@ -613,7 +712,6 @@
   function launchConfetti() {
     const cvs = dom.confetti;
     const parentRect = cvs.parentElement.getBoundingClientRect();
-    const DPR = Math.min(window.devicePixelRatio || 1, 2);
     cvs.width = parentRect.width * DPR;
     cvs.height = parentRect.height * DPR;
     const cctx = cvs.getContext('2d');
@@ -621,7 +719,7 @@
 
     const colors = ['#FFD166', '#EF476F', '#06D6A0', '#118AB2', '#9D7CE0', '#FF6B9D'];
     confettiParticles = [];
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < 120; i++) {
       confettiParticles.push({
         x: parentRect.width / 2,
         y: parentRect.height / 2,
@@ -631,8 +729,7 @@
         size: 4 + Math.random() * 6,
         color: colors[Math.floor(Math.random() * colors.length)],
         rot: Math.random() * Math.PI * 2,
-        vr: (Math.random() - 0.5) * 0.3,
-        life: 1
+        vr: (Math.random() - 0.5) * 0.3
       });
     }
 
@@ -640,26 +737,21 @@
     function animate(now) {
       const elapsed = now - start;
       cctx.clearRect(0, 0, parentRect.width, parentRect.height);
+      const life = Math.max(0, 1 - elapsed / 4000);
       confettiParticles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += p.g;
-        p.vx *= 0.995;
+        p.x += p.vx; p.y += p.vy;
+        p.vy += p.g; p.vx *= 0.995;
         p.rot += p.vr;
-        p.life = Math.max(0, 1 - elapsed / 4000);
         cctx.save();
         cctx.translate(p.x, p.y);
         cctx.rotate(p.rot);
-        cctx.globalAlpha = p.life;
+        cctx.globalAlpha = life;
         cctx.fillStyle = p.color;
         cctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
         cctx.restore();
       });
-      if (elapsed < 4000) {
-        confettiRAF = requestAnimationFrame(animate);
-      } else {
-        cctx.clearRect(0, 0, parentRect.width, parentRect.height);
-      }
+      if (elapsed < 4000) confettiRAF = requestAnimationFrame(animate);
+      else cctx.clearRect(0, 0, parentRect.width, parentRect.height);
     }
     cancelAnimationFrame(confettiRAF);
     confettiRAF = requestAnimationFrame(animate);
@@ -681,6 +773,7 @@
     }
     dom.historyEmpty.style.display = 'none';
     dom.historyList.style.display = 'flex';
+    const frag = document.createDocumentFragment();
     state.history.forEach((h, idx) => {
       const li = document.createElement('li');
       li.className = 'history-item';
@@ -691,8 +784,9 @@
           <div class="h-meta">الرقم: <span>${escapeHtml(h.empId)}</span> · ${formatDate(h.at)} · ${h.totalParticipants} مشاركاً</div>
         </div>
       `;
-      dom.historyList.appendChild(li);
+      frag.appendChild(li);
     });
+    dom.historyList.appendChild(frag);
   }
 
   function openHistory() {
@@ -728,7 +822,6 @@
 
   // ============ Events ============
   function attachEvents() {
-    // Form submit
     dom.form.addEventListener('submit', (e) => {
       e.preventDefault();
       const name = sanitize(dom.name.value);
@@ -744,13 +837,10 @@
       dom.name.focus();
     });
 
-    // Clear errors on input
     dom.name.addEventListener('input', () => setFieldError(dom.name, ''));
     dom.emp.addEventListener('input', () => setFieldError(dom.emp, ''));
-
     dom.cancelEditBtn.addEventListener('click', cancelEdit);
 
-    // Participants list (delegated)
     dom.participants.addEventListener('click', async (e) => {
       const btn = e.target.closest('.icon-btn');
       if (!btn) return;
@@ -759,45 +849,44 @@
       const id = li && li.dataset.id;
       if (!id) return;
       const act = btn.dataset.act;
-      if (act === 'edit') {
-        startEdit(id);
-      } else if (act === 'delete') {
+      if (act === 'edit') startEdit(id);
+      else if (act === 'delete') {
         const ok = await askConfirm('حذف مشارك', 'هل تريد حذف هذا المشارك من القائمة؟');
         if (ok) deleteParticipant(id);
       }
     });
 
-    // Clear all
     dom.clearAll.addEventListener('click', async () => {
-      if (state.participants.length === 0) return;
-      if (state.isSpinning) return;
+      if (state.participants.length === 0 || state.isSpinning) return;
       const ok = await askConfirm('تصفير القائمة', 'سيتم حذف جميع المشاركين. هل أنت متأكد؟');
       if (ok) clearAllParticipants();
     });
 
-    // Draw
+    if (dom.loadSample) dom.loadSample.addEventListener('click', loadSampleData);
+
     dom.drawBtn.addEventListener('click', performDraw);
 
-    // Exclude winner toggle (visual persistence only needed locally)
-    dom.excludeWinner.addEventListener('change', () => {
-      const mode = dom.excludeWinner.checked ? 'سيتم استبعاد الفائز السابق' : 'جميع المشاركين مؤهلون';
-      showToast(mode, 'info');
+    dom.goToDraw.addEventListener('click', () => {
+      if (state.participants.length < 1) {
+        showToast('أضف مشاركاً واحداً على الأقل قبل الانتقال للسحب', 'error');
+        return;
+      }
+      showScreen('draw');
+    });
+    dom.backToRegister.addEventListener('click', () => {
+      if (state.isSpinning) { showToast('انتظر انتهاء السحب قبل الرجوع', 'info'); return; }
+      showScreen('register');
     });
 
-    // Winner overlay buttons
     dom.drawAgain.addEventListener('click', () => {
       hideWinner();
-      setTimeout(() => {
-        // If exclude-winner is on and only one person remains, warn
-        performDraw();
-      }, 220);
+      setTimeout(() => performDraw(), 220);
     });
     dom.closeWinner.addEventListener('click', hideWinner);
     dom.winnerOverlay.addEventListener('click', (e) => {
       if (e.target === dom.winnerOverlay) hideWinner();
     });
 
-    // History drawer
     dom.toggleHistory.addEventListener('click', () => {
       if (dom.historyDrawer.classList.contains('open')) closeHistoryDrawer();
       else openHistory();
@@ -809,29 +898,28 @@
       const ok = await askConfirm('مسح السجل', 'سيتم حذف كل سجل السحوبات السابق. متابعة؟');
       if (ok) {
         state.history = [];
-        state.lastWinnerId = null;
         saveHistory();
         renderHistory();
         showToast('تم مسح السجل', 'info');
       }
     });
 
-    // ESC key closes overlays
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (!dom.winnerOverlay.hidden) hideWinner();
         else if (dom.historyDrawer.classList.contains('open')) closeHistoryDrawer();
-        else if (!dom.confirmOverlay.hidden) {
-          dom.confirmNo.click();
-        }
+        else if (!dom.confirmOverlay.hidden) dom.confirmNo.click();
       }
     });
 
-    // Window resize → redraw wheel
+    // Resize — invalidate cache so it rebuilds at new size
     let resizeTimer;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(drawWheel, 120);
+      resizeTimer = setTimeout(() => {
+        invalidateWheelCache();
+        drawWheel();
+      }, 150);
     });
   }
 
@@ -840,20 +928,22 @@
     loadState();
     renderParticipants();
     renderHistory();
-    drawWheel();
     updateDrawButton();
     setStatus('ready', 'جاهز للسحب');
     attachEvents();
+    showScreen('register');
   }
 
-  // Wait for fonts + layout before initial wheel draw
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-  // Redraw once fonts load (canvas needs font metrics)
+
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(drawWheel).catch(() => {});
+    document.fonts.ready.then(() => {
+      invalidateWheelCache();
+      if (dom.screenDraw && !dom.screenDraw.hidden) drawWheel();
+    }).catch(() => {});
   }
 })();
