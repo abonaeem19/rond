@@ -112,10 +112,8 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
 }
 .header-right  { justify-content: flex-start; }
 .header-center { justify-content: center; text-align: center; flex-direction: column; gap: 2px; }
-.header-left   { justify-content: flex-end; }
-
-.logo-sdb {
-  height: 58px;
+.header-left   { justify-content: flex-end; }.logo-sdb {
+  height: 100px;
   width: auto;
   object-fit: contain;
   filter: drop-shadow(0 4px 14px rgba(45, 191, 166, 0.35));
@@ -129,48 +127,27 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
   border-inline-start: 2px solid var(--gold);
 }
 .tagline-text {
-  font-size: 15px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: -0.02em;
   white-space: nowrap;
 }
 .tagline-sub {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--gold);
   font-weight: 700;
   letter-spacing: 0;
   white-space: nowrap;
 }.logo-ai {
-  height: 58px;
-  width: 58px;
+  height: 200px;
+  width: auto;
   object-fit: contain;
+  filter: drop-shadow(0 4px 20px rgba(41, 179, 115, 0.4));
+  transition: transform 0.3s ease;
 }
-
-.ai-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  border-radius: var(--r-md);
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.18);
-}
-.ai-icon {
-  flex-shrink: 0;
-  filter: drop-shadow(0 2px 8px rgba(99, 102, 241, 0.4));
-}
-.ai-label {
-  font-size: 14px;
-  font-weight: 800;
-  color: #A5B4FC;
-  white-space: nowrap;
-  letter-spacing: -0.02em;
-}
-.logo-ai:hover, .ai-brand:hover .ai-icon { transform: scale(1.05); }
-
-.page-title {
-  font-size: clamp(20px, 2.4vw, 28px);
+.logo-ai:hover { transform: scale(1.05); }.page-title {
+  font-size: clamp(28px, 3vw, 42px);
   font-weight: 900;
   line-height: 1.1;
   background: linear-gradient(90deg, #fff 0%, #FFD166 100%);
@@ -178,6 +155,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
   background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
+  margin-top: 20px;
 }
 .page-sub {
   margin: 2px 0 0;
@@ -307,8 +285,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
   border-radius: 999px;
   padding: 6px 14px;
   backdrop-filter: blur(10px);
-}
-.step {
+}.step {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -316,6 +293,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
   font-weight: 700;
   font-size: 13px;
   transition: color 0.2s ease;
+  text-decoration: none;
 }
 .step-num {
   display: grid;
@@ -1187,16 +1165,50 @@ body.spinning .panel-form { opacity: 0.55; pointer-events: none; filter: saturat
   .header-center { grid-area: center; }
   .header-left   { grid-area: left; }
   .logo-sdb { height: 42px; max-width: 180px; }
-  .logo-ai { height: 44px; width: 44px; }
-  .ai-brand { padding: 6px 10px; }
-  .ai-label { font-size: 11px; }
+  .logo-ai { height: 80px; }
   .tagline { padding-inline: 8px; }
   .tagline-text { font-size: 12px; }
   .tagline-sub { font-size: 9px; }
   .page-title { font-size: 20px; }
-  .page-sub { font-size: 11px; }
-
-  .toolbar { width: 100%; justify-content: space-between; }
+  .page-sub { font-size: 11px; }.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 2px;
+}
+.toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.db-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-mute);
+}
+.db-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-mute);
+}
+.db-status.online .db-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+.db-status.online {
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.3);
+}
   .toolbar .btn span:not(.pill) { display: none; }
   .stepper { padding: 4px 10px; gap: 6px; }
   .step-label { display: none; }
@@ -1240,4 +1252,92 @@ body.spinning .panel-form { opacity: 0.55; pointer-events: none; filter: saturat
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+.app-foot {
+  text-align: center;
+  color: var(--text-mute);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+/* ============ Admin PIN Gate ============ */
+.pin-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--bg-0);
+  background:
+    radial-gradient(600px 400px at 50% 40%, rgba(255, 209, 102, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+}
+.pin-gate.unlocked { display: none; }
+.pin-card {
+  width: min(400px, 92vw);
+  background: linear-gradient(160deg, #1a2150 0%, #0a0e27 100%);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-xl);
+  padding: 40px 32px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+  animation: popIn 0.4s ease;
+}
+.pin-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.pin-card h2 {
+  font-size: 24px;
+  font-weight: 900;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.pin-card p {
+  color: var(--text-mute);
+  font-size: 14px;
+  margin: 0 0 24px;
+  line-height: 1.6;
+}
+.pin-input-wrap {
+  margin-bottom: 18px;
+}
+.pin-input {
+  width: 100%;
+  padding: 16px 20px;
+  border-radius: var(--r-lg);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.pin-input:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.15);
+}
+.pin-input.shake {
+  animation: shake 0.4s ease;
+  border-color: var(--danger);
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+.pin-err {
+  display: block;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 20px;
+  margin-top: 8px;
 }

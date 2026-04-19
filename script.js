@@ -43,6 +43,7 @@
     goToDraw: $('#goToDraw'),
     backToRegister: $('#backToRegister'),
     stepper: $('#stepper'),
+    dbStatus: $('#dbStatus'),
     drawCount: $('#drawCount'),
     counterSummary: $('#counterSummary'),
 
@@ -173,15 +174,24 @@
   function saveHistory() {
     try { localStorage.setItem(STORAGE_HISTORY, JSON.stringify(state.history)); } catch (_) {}
   }
-  function loadState() {
+  async function loadState() {
+    // Try DB first, fall back to localStorage
     try {
-      const p = localStorage.getItem(STORAGE_PARTICIPANTS);
-      if (p) state.participants = JSON.parse(p) || [];
-      const h = localStorage.getItem(STORAGE_HISTORY);
-      if (h) state.history = JSON.parse(h) || [];
-    } catch (_) {
-      state.participants = [];
-      state.history = [];
+      state.participants = await DB.getParticipants();
+      state.history = await DB.getDraws();
+    } catch (_) {}
+    // If DB returned empty, try localStorage cache
+    if (!state.participants.length) {
+      try {
+        const p = localStorage.getItem(STORAGE_PARTICIPANTS);
+        if (p) state.participants = JSON.parse(p) || [];
+      } catch (_) {}
+    }
+    if (!state.history.length) {
+      try {
+        const h = localStorage.getItem(STORAGE_HISTORY);
+        if (h) state.history = JSON.parse(h) || [];
+      } catch (_) {}
     }
   }
 
@@ -226,8 +236,15 @@
   // ============ Participants CRUD ============
   function invalidateWheelCache() { wheelCache = null; }
 
-  function addParticipant(name, empId) {
-    state.participants.push({ id: uid(), name, empId, createdAt: new Date().toISOString() });
+  async function addParticipant(name, empId) {
+    var p;
+    if (DB.isOnline) {
+      p = await DB.addParticipant(name, empId);
+      if (!p) { showToast('خطأ في حفظ المشارك', 'error'); return; }
+    } else {
+      p = { id: uid(), name, empId, createdAt: new Date().toISOString() };
+    }
+    state.participants.push(p);
     saveParticipants();
     invalidateWheelCache();
     renderParticipants();
@@ -236,7 +253,11 @@
     showToast('تمت إضافة المشارك', 'success');
   }
 
-  function updateParticipant(id, name, empId) {
+  async function updateParticipant(id, name, empId) {
+    if (DB.isOnline) {
+      var ok = await DB.updateParticipant(id, name, empId);
+      if (!ok) { showToast('خطأ في تحديث المشارك', 'error'); return; }
+    }
     const p = state.participants.find(p => p.id === id);
     if (!p) return;
     p.name = name; p.empId = empId;
@@ -247,7 +268,11 @@
     showToast('تم تحديث المشارك', 'success');
   }
 
-  function deleteParticipant(id) {
+  async function deleteParticipant(id) {
+    if (DB.isOnline) {
+      var ok = await DB.deleteParticipant(id);
+      if (!ok) { showToast('خطأ في حذف المشارك', 'error'); return; }
+    }
     const idx = state.participants.findIndex(p => p.id === id);
     if (idx < 0) return;
     state.participants.splice(idx, 1);
@@ -260,7 +285,11 @@
     showToast('تم حذف المشارك', 'info');
   }
 
-  function clearAllParticipants() {
+  async function clearAllParticipants() {
+    if (DB.isOnline) {
+      var ok = await DB.clearAllParticipants();
+      if (!ok) { showToast('خطأ في تصفير القائمة', 'error'); return; }
+    }
     state.participants = [];
     cancelEdit();
     saveParticipants();
@@ -344,13 +373,24 @@
     const ok = await askConfirm('تحميل بيانات تجريبية', msg);
     if (!ok) return;
     const newOnes = generateSampleParticipants(100);
-    state.participants = state.participants.concat(newOnes);
+    if (DB.isOnline) {
+      var dbOk = await DB.addBulkParticipants(newOnes);
+      if (dbOk) {
+        // Reload from DB to get server-generated IDs
+        state.participants = await DB.getParticipants();
+      } else {
+        showToast('خطأ في حفظ البيانات التجريبية', 'error');
+        return;
+      }
+    } else {
+      state.participants = state.participants.concat(newOnes);
+    }
     saveParticipants();
     invalidateWheelCache();
     renderParticipants();
     drawWheel();
     updateDrawButton();
-    showToast(`تمت إضافة ${newOnes.length} مشارك تجريبي`, 'success');
+    showToast('تمت إضافة ' + newOnes.length + ' مشارك تجريبي', 'success');
   }
 
   // ============ Screen Navigation ============
@@ -669,7 +709,7 @@
     requestAnimationFrame(step);
   }
 
-  function finishDraw(winner) {
+  async function finishDraw(winner) {
     state.isSpinning = false;
     document.body.classList.remove('spinning');
 
@@ -680,6 +720,10 @@
       at: new Date().toISOString(),
       totalParticipants: state.participants.length
     };
+    // Save to DB
+    if (DB.isOnline) {
+      await DB.addDraw(winner.name, winner.empId, state.participants.length);
+    }
     state.history.unshift(entry);
     if (state.history.length > 100) state.history.length = 100;
     saveHistory();
@@ -897,6 +941,7 @@
       if (state.history.length === 0) return;
       const ok = await askConfirm('مسح السجل', 'سيتم حذف كل سجل السحوبات السابق. متابعة؟');
       if (ok) {
+        if (DB.isOnline) await DB.clearDraws();
         state.history = [];
         saveHistory();
         renderHistory();
@@ -924,14 +969,40 @@
   }
 
   // ============ Boot ============
-  function init() {
-    loadState();
+  async function init() {
+    // Initialize database (Supabase or localStorage fallback)
+    DB.init();
+
+    // Load data from DB (async)
+    await loadState();
     renderParticipants();
     renderHistory();
     updateDrawButton();
     setStatus('ready', 'جاهز للسحب');
     attachEvents();
     showScreen('register');
+
+    // Show connection status
+    if (DB.isOnline) {
+      showToast('متصل بقاعدة البيانات — المزامنة مفعّلة', 'success');
+      if (dom.dbStatus) {
+        dom.dbStatus.classList.add('online');
+        dom.dbStatus.querySelector('.db-label').textContent = 'متصل';
+      }
+    }
+
+    // Real-time sync: when another device changes data, refresh automatically
+    DB.onChange = async function () {
+      state.participants = await DB.getParticipants();
+      state.history = await DB.getDraws();
+      saveParticipants();
+      saveHistory();
+      invalidateWheelCache();
+      renderParticipants();
+      renderHistory();
+      drawWheel();
+      updateDrawButton();
+    };
   }
 
   if (document.readyState === 'loading') {

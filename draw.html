@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e27" />
+  <title>السحب — روليت السحب العشوائي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
+
+  <div class="app">
+    <!-- ====== HEADER ====== -->
+    <header class="app-header">
+      <div class="header-zone header-right">
+        <img src="assets/logo-sdb.svg" alt="بنك التنمية الاجتماعية" class="logo-sdb" />
+        <div class="tagline">
+          <span class="tagline-text">بنك التنمية الاجتماعية</span>
+          <span class="tagline-sub">نقود للابتكار</span>
+        </div>
+      </div>
+      <div class="header-zone header-center">
+        <h1 class="page-title">روليت السحب العشوائي</h1>
+      </div>
+      <div class="header-zone header-left">
+        <img src="assets/logo-ai.svg" alt="الذكاء الاصطناعي" class="logo-ai" />
+      </div>
+    </header>
+
+    <!-- ====== TOOLBAR ====== -->
+    <div class="toolbar">
+      <div class="toolbar-right">
+        <div class="db-status" id="dbStatus">
+          <span class="db-dot"></span>
+          <span class="db-label">غير متصل</span>
+        </div>
+        <div class="stepper">
+          <a href="index.html" class="step step-done"><span class="step-num">✓</span><span class="step-label">التسجيل</span></a>
+          <span class="step-sep"></span>
+          <div class="step step-active"><span class="step-num">2</span><span class="step-label">السحب</span></div>
+        </div>
+      </div>
+      <button id="toggleHistory" class="btn btn-ghost" type="button" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+        <span>سجل السحوبات</span>
+        <span class="pill" id="historyCount">0</span>
+      </button>
+    </div>
+
+    <!-- ====== DRAW PAGE ====== -->
+    <main class="screen screen-draw">
+      <section class="panel panel-wheel panel-wide" aria-labelledby="wheel-title">
+        <div class="wheel-head">
+          <a href="index.html" class="btn btn-ghost">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            رجوع للتسجيل
+          </a>
+          <h2 id="wheel-title" class="panel-title">عجلة السحب</h2>
+          <div class="status status-ready" id="status" role="status" aria-live="polite">
+            <span class="dot"></span>
+            <span class="status-text">جاهز للسحب</span>
+          </div>
+        </div>
+
+        <div class="draw-summary">
+          <span>عدد المشاركين المؤهلين:</span>
+          <strong id="drawCount">0</strong>
+        </div>
+
+        <div class="wheel-stage">
+          <div class="pointer" aria-hidden="true">
+            <svg viewBox="0 0 40 48" width="34" height="40">
+              <path d="M20 44 L4 12 Q4 4 12 4 L28 4 Q36 4 36 12 Z" fill="#FFD166" stroke="#0a0e27" stroke-width="2" stroke-linejoin="round"/>
+              <circle cx="20" cy="14" r="4" fill="#0a0e27"/>
+            </svg>
+          </div>
+          <div class="wheel-wrap">
+            <canvas id="wheel" width="720" height="720" aria-label="عجلة السحب العشوائي"></canvas>
+            <div class="wheel-empty" id="wheelEmpty" hidden>
+              <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              <p>لا يوجد مشاركون</p>
+            </div>
+          </div>
+          <div class="wheel-center-hub" aria-hidden="true"></div>
+        </div>
+
+        <div class="wheel-actions">
+          <button id="drawBtn" class="btn btn-primary btn-large" type="button" disabled>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
+            <span>بدء السحب</span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-foot"><span>Created by ACE</span></footer>
+  </div>
+
+  <!-- ====== WINNER OVERLAY ====== -->
+  <div class="winner-overlay" id="winnerOverlay" hidden>
+    <canvas id="confetti" class="confetti"></canvas>
+    <div class="winner-card" role="dialog" aria-modal="true" aria-labelledby="winnerName">
+      <div class="ribbon">🏆 الفائز</div>
+      <div class="winner-avatar" id="winnerAvatar">?</div>
+      <div class="winner-name" id="winnerName"></div>
+      <div class="winner-emp">
+        <span>الرقم الوظيفي:</span>
+        <strong id="winnerEmp"></strong>
+      </div>
+      <div class="winner-time" id="winnerTime"></div>
+      <div class="winner-actions">
+        <button id="drawAgain" class="btn btn-primary" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          سحب مرة أخرى
+        </button>
+        <button id="closeWinner" class="btn btn-ghost" type="button">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== HISTORY DRAWER ====== -->
+  <aside class="history-drawer" id="historyDrawer" aria-hidden="true">
+    <div class="history-head">
+      <h3>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+        سجل السحوبات
+      </h3>
+      <button id="closeHistory" class="btn-text" type="button" aria-label="إغلاق">✕</button>
+    </div>
+    <ul id="historyList" class="history-list"></ul>
+    <div class="history-empty" id="historyEmpty"><p>لا يوجد سحوبات سابقة</p></div>
+    <div class="history-foot">
+      <button id="clearHistory" class="btn btn-ghost btn-block" type="button">مسح السجل</button>
+    </div>
+  </aside>
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+
+  <!-- ====== CONFIRM DIALOG ====== -->
+  <div class="confirm-overlay" id="confirmOverlay" hidden>
+    <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h3 id="confirmTitle">تأكيد</h3>
+      <p id="confirmMsg">هل أنت متأكد؟</p>
+      <div class="confirm-actions">
+        <button id="confirmYes" class="btn btn-primary" type="button">نعم</button>
+        <button id="confirmNo" class="btn btn-ghost" type="button">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- ====== ADMIN PIN GATE ====== -->
+  <div class="pin-gate" id="pinGate">
+    <div class="pin-card">
+      <div class="pin-icon">🔐</div>
+      <h2>صفحة الإدارة</h2>
+      <p>أدخل الرقم السري للوصول إلى لوحة السحب</p>
+      <div class="pin-input-wrap">
+        <input type="password" id="pinInput" class="pin-input" placeholder="الرقم السري" maxlength="20" autocomplete="off" inputmode="numeric" />
+        <small class="pin-err" id="pinErr"></small>
+      </div>
+      <button id="pinSubmit" class="btn btn-primary btn-large btn-block" type="button">دخول</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="db.js"></script>
+  <script src="draw-app.js"></script>
+</body>
+</html>
