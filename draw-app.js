@@ -29,6 +29,9 @@
     historyEmpty: $('#historyEmpty'), historyCount: $('#historyCount'),
     clearHistory: $('#clearHistory'), drawerBackdrop: $('#drawerBackdrop'),
     dbStatus: $('#dbStatus'),
+    // Admin panel
+    adminList: $('#adminList'), adminCount: $('#adminCount'), adminEmpty: $('#adminEmpty'),
+    clearAll: $('#clearAll'), loadSample: $('#loadSample'),
     confirmOverlay: $('#confirmOverlay'), confirmTitle: $('#confirmTitle'),
     confirmMsg: $('#confirmMsg'), confirmYes: $('#confirmYes'), confirmNo: $('#confirmNo'),
     toast: $('#toast')
@@ -270,6 +273,94 @@
   var rTimer;
   window.addEventListener('resize', function () { clearTimeout(rTimer); rTimer = setTimeout(function () { wheelCache = null; drawWheel(); }, 150); });
 
+  // ===== Admin: Participants Management =====
+  var FIRST = ['محمد','أحمد','عبدالله','خالد','سعد','فهد','عبدالعزيز','علي','عمر','سلمان','ناصر','تركي','بندر','فيصل','نواف','ماجد','هشام','ياسر','طارق','سامي','وليد','عادل','راشد','مازن','غازي','سلطان','عبدالرحمن','إبراهيم','يوسف','حسن','مشعل','عبدالمجيد','بدر','سعود','فارس','رامي','زياد','مروان','أنس','باسم','فاطمة','نورة','سارة','منى','هدى','أمل','ريم','دانة','جواهر','لطيفة','العنود','روان','شهد','لمى','ليان','جود','رهف','غلا','أسماء','مها'];
+  var MID = ['محمد','أحمد','عبدالله','خالد','سعد','فهد','عبدالعزيز','علي','عمر','سلمان','ناصر','إبراهيم','يوسف','حسن','حسين','صالح','سعيد','طلال','عبدالرحمن','بدر'];
+  var LAST = ['العتيبي','القحطاني','الحربي','الزهراني','الشمري','الغامدي','المطيري','الدوسري','السبيعي','السلمي','البلوي','العنزي','الرشيدي','الخالدي','الشهري','الأحمدي','العمري','القرشي','الجهني','البقمي','الثقفي','المالكي','الفيفي','العسيري','الحازمي','الصاعدي','المولد','الرويلي','العصيمي','الخثعمي'];
+
+  function renderAdmin() {
+    if (!dom.adminList) return;
+    dom.adminList.innerHTML = '';
+    var n = participants.length;
+    if (dom.adminCount) dom.adminCount.textContent = n;
+    if (n === 0) {
+      if (dom.adminEmpty) dom.adminEmpty.style.display = 'grid';
+      dom.adminList.style.display = 'none';
+      return;
+    }
+    if (dom.adminEmpty) dom.adminEmpty.style.display = 'none';
+    dom.adminList.style.display = '';
+    var frag = document.createDocumentFragment();
+    participants.forEach(function (p, i) {
+      var li = document.createElement('li');
+      li.className = 'participant';
+      li.dataset.id = p.id;
+      li.innerHTML = '<div class="avatar" style="background:' + COLORS[i % COLORS.length] + '">' + escapeHtml(initials(p.name)) + '</div>'
+        + '<div class="p-info"><div class="p-name">' + escapeHtml(p.name) + '</div><div class="p-emp">الرقم: ' + escapeHtml(p.empId) + '</div></div>'
+        + '<div class="p-actions">'
+        + '<button class="icon-btn danger" data-act="delete" title="حذف"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>'
+        + '</div>';
+      frag.appendChild(li);
+    });
+    dom.adminList.appendChild(frag);
+  }
+
+  async function deleteP(id) {
+    if (DB.isOnline) { if (!(await DB.deleteParticipant(id))) { showToast('خطأ في الحذف', 'error'); return; } }
+    participants = participants.filter(function (x) { return x.id !== id; });
+    try { localStorage.setItem('roulette_participants_v1', JSON.stringify(participants)); } catch (_) {}
+    wheelCache = null; drawWheel(); updateBtn(); renderAdmin();
+    showToast('تم حذف المشارك', 'info');
+  }
+
+  async function clearAllP() {
+    if (DB.isOnline) { if (!(await DB.clearAllParticipants())) { showToast('خطأ في التصفير', 'error'); return; } }
+    participants = [];
+    try { localStorage.setItem('roulette_participants_v1', JSON.stringify(participants)); } catch (_) {}
+    wheelCache = null; drawWheel(); updateBtn(); renderAdmin();
+    showToast('تم تصفير القائمة', 'info');
+  }
+
+  async function loadSampleData() {
+    if (!(await askConfirm('تحميل بيانات تجريبية', 'سيتم تحميل 100 مشارك تجريبي. متابعة؟'))) return;
+    var list = [], usedN = new Set(), usedI = new Set(participants.map(function (p) { return p.empId; }));
+    var nextId = 10001;
+    while (usedI.has(String(nextId))) nextId++;
+    var g = 0;
+    while (list.length < 100 && g < 2000) {
+      g++;
+      var f = FIRST[secureRandomIndex(FIRST.length)], m = MID[secureRandomIndex(MID.length)], l = LAST[secureRandomIndex(LAST.length)];
+      var full = f + ' ' + m + ' ' + l;
+      if (usedN.has(full)) continue;
+      usedN.add(full);
+      while (usedI.has(String(nextId))) nextId++;
+      usedI.add(String(nextId));
+      list.push({ id: uid(), name: full, empId: String(nextId++) });
+    }
+    if (DB.isOnline) {
+      if (await DB.addBulkParticipants(list)) { participants = await DB.getParticipants(); }
+      else { showToast('خطأ في الحفظ', 'error'); return; }
+    } else {
+      participants = participants.concat(list);
+    }
+    try { localStorage.setItem('roulette_participants_v1', JSON.stringify(participants)); } catch (_) {}
+    wheelCache = null; drawWheel(); updateBtn(); renderAdmin();
+    showToast('تمت إضافة ' + list.length + ' مشارك', 'success');
+  }
+
+  // Admin events
+  if (dom.adminList) dom.adminList.addEventListener('click', async function (e) {
+    var btn = e.target.closest('.icon-btn'); if (!btn) return;
+    var li = btn.closest('.participant'), id = li && li.dataset.id; if (!id) return;
+    if (btn.dataset.act === 'delete') {
+      if (await askConfirm('حذف مشارك', 'هل تريد حذف هذا المشارك؟')) await deleteP(id);
+    }
+  });
+  if (dom.clearAll) dom.clearAll.addEventListener('click', async function () {
+    if (participants.length && (await askConfirm('تصفير القائمة', 'سيتم حذف جميع المشاركين. متأكد؟'))) await clearAllP();
+  });
+  if (dom.loadSample) dom.loadSample.addEventListener('click', loadSampleData);
+
   // ===== Admin PIN =====
   var ADMIN_PIN = '2026';  // ← غيّر الرقم السري هنا
 
@@ -308,7 +399,7 @@
       try { var h = localStorage.getItem('roulette_history_v1'); if (h) history = JSON.parse(h) || []; } catch (_) {}
     }
 
-    drawWheel(); updateBtn(); renderHistory();
+    drawWheel(); updateBtn(); renderHistory(); renderAdmin();
     setStatus('ready', 'جاهز للسحب');
 
     if (DB.isOnline && dom.dbStatus) {
@@ -321,7 +412,7 @@
       participants = await DB.getParticipants();
       history = await DB.getDraws();
       wheelCache = null;
-      drawWheel(); updateBtn(); renderHistory();
+      drawWheel(); updateBtn(); renderHistory(); renderAdmin();
     };
   }
 

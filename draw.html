@@ -99,6 +99,31 @@
           </button>
         </div>
       </section>
+
+      <!-- ====== ADMIN: PARTICIPANTS MANAGEMENT ====== -->
+      <section class="panel panel-wide admin-panel" aria-labelledby="admin-title">
+        <div class="list-head">
+          <h3 id="admin-title">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            إدارة المشاركين
+            <span class="badge" id="adminCount">0</span>
+          </h3>
+          <div class="list-head-actions">
+            <button id="loadSample" class="btn-text btn-text-info" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              تحميل 100 تجريبي
+            </button>
+            <button id="clearAll" class="btn-text" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+              تصفير القائمة
+            </button>
+          </div>
+        </div>
+        <ul class="participants participants-grid" id="adminList" aria-live="polite"></ul>
+        <div class="empty-hint" id="adminEmpty">
+          <p>لا يوجد مشاركون</p>
+        </div>
+      </section>
     </main>
 
     <footer class="app-foot"><span>Created by ACE</span></footer>
